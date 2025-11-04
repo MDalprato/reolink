@@ -6,6 +6,7 @@ This repository contains a small asynchronous Python script that connects to a R
 - Subscribes to the Reolink Baichuan TCP push channel for near real-time AI detections.
 - Logs detections with both channel index and the camera name supplied by the device.
 - Issues HTTP callbacks for every new detection and schedules an automatic reset after a configurable delay.
+- Automatically retries the connection with exponential backoff whenever the device disconnects.
 - Gracefully handles shutdown (Ctrl+C) and cleans up pending network requests.
 
 ## Requirements
@@ -44,7 +45,8 @@ The script will:
 3. For each new AI detection (person, vehicle, pet), log the event, call  
    `GET {MOTION_BASE_URL}/motion?{camera name}`, and five seconds later call  
    `GET {MOTION_BASE_URL}/motion/reset?{camera name}`. Camera names are URL-encoded automatically.
-4. Continue running until interrupted. Press `Ctrl+C` to stop; pending HTTP requests complete, the Baichuan subscription is released, and the session logs out cleanly.
+4. If the connection drops, automatically back off and retry the login.
+5. Continue running until interrupted. Press `Ctrl+C` to stop; pending HTTP requests complete, the Baichuan subscription is released, and the session logs out cleanly.
 
 ## Notes
 - If the camera name is missing, the script falls back to `channel-{index}` when building the webhook URL.
