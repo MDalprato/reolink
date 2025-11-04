@@ -30,6 +30,15 @@ async def tcp_push_demo():
             "Missing credentials: ensure REOLINK_HOST/USERNAME/PASSWORD or HOST/USER/PASSWORD are set in the environment."
         )
 
+    _LOGGER.info(
+        "Settings loaded: host=%s, webhook_base=%s, motion_reset_delay=%.1fs, reconnect_initial=%.1fs, reconnect_max=%.1fs",
+        settings.reolink_host,
+        settings.motion_base_url,
+        settings.motion_reset_delay,
+        settings.reconnect_initial_delay,
+        settings.reconnect_max_delay,
+    )
+
     reconnect_delay = settings.reconnect_initial_delay
 
     while True:
@@ -39,7 +48,9 @@ async def tcp_push_demo():
             settings.reolink_username,
             settings.reolink_password
         )
+        _LOGGER.debug("Created Host instance with stream=%s protocol=%s", host.stream if hasattr(host, "stream") else "unknown", getattr(host, "_protocol", "unknown"))
         session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
+        _LOGGER.debug("HTTP client session created with timeout=5s")
         pending_tasks: Set[asyncio.Task] = set()
         loop = asyncio.get_running_loop()
 
@@ -51,10 +62,16 @@ async def tcp_push_demo():
 
             try:
                 async with session.get(motion_url) as response:
-                    await response.text()
+                    body = await response.text()
                     if response.status >= 400:
                         raise RuntimeError(f"status HTTP {response.status}")
-                _LOGGER.info("Inviata notifica movimento per %s (%s)", name_for_url, motion_url)
+                _LOGGER.info(
+                    "Inviata notifica movimento per %s (%s) [status=%s, body_len=%s]",
+                    name_for_url,
+                    motion_url,
+                    response.status,
+                    len(body),
+                )
             except Exception as err:
                 _LOGGER.warning("Errore durante la notifica di movimento per %s: %s", name_for_url, err)
 
@@ -62,10 +79,16 @@ async def tcp_push_demo():
 
             try:
                 async with session.get(reset_url) as response:
-                    await response.text()
+                    body = await response.text()
                     if response.status >= 400:
                         raise RuntimeError(f"status HTTP {response.status}")
-                _LOGGER.info("Reset movimento per %s (%s)", name_for_url, reset_url)
+                _LOGGER.info(
+                    "Reset movimento per %s (%s) [status=%s, body_len=%s]",
+                    name_for_url,
+                    reset_url,
+                    response.status,
+                    len(body),
+                )
             except Exception as err:
                 _LOGGER.warning("Errore durante il reset di movimento per %s: %s", name_for_url, err)
 
@@ -74,6 +97,11 @@ async def tcp_push_demo():
         try:
             # connect and obtain/cache device settings and capabilities
             await host.get_host_data()
+            _LOGGER.info(
+                "Host data retrieved: cameras=%s, channels=%s",
+                host.num_cameras if hasattr(host, "num_cameras") else "unknown",
+                getattr(host, "channels", []),
+            )
             try:
                 await host.get_ai_state_all_ch()
             except Exception as err:
@@ -86,6 +114,12 @@ async def tcp_push_demo():
                     ai_state_cache[channel][label] = any(
                         bool(host.ai_detected(channel, obj_type)) for obj_type in object_types
                     )
+                _LOGGER.info(
+                    "Initial AI state for camera '%s' (channel %s): %s",
+                    host.camera_name(channel),
+                    channel,
+                    {label: ai_state_cache[channel][label] for label in TRACKED_AI_EVENTS},
+                )
 
             def ai_event_callback() -> None:
                 for channel in host.channels:
@@ -102,18 +136,34 @@ async def tcp_push_demo():
                                 channel,
                             )
                             task = loop.create_task(trigger_motion(camera_name, channel))
+                            _LOGGER.info(
+                                "Scheduling motion notification task for camera '%s' (channel %s) due to %s detection",
+                                camera_name,
+                                channel,
+                                label,
+                            )
                             pending_tasks.add(task)
                             task.add_done_callback(lambda fut: pending_tasks.discard(fut))
+                        elif not detected and previous:
+                            _LOGGER.info(
+                                "Fine rilevamento %s per la telecamera %s (canale %s)",
+                                label,
+                                camera_name,
+                                channel,
+                            )
                         channel_cache[label] = detected
 
             # Register callback and subscribe to events
             host.baichuan.register_callback("ai_event_logger", ai_event_callback)
+            _LOGGER.debug("Callback 'ai_event_logger' registered on Baichuan client")
             await host.baichuan.subscribe_events()
+            _LOGGER.info("Subscribed to Baichuan events")
             reconnect_delay = settings.reconnect_initial_delay
 
             # Process TCP events until interrupted
             while True:
                 if hasattr(host.baichuan, "check_subscribe_events"):
+                    _LOGGER.debug("Running Baichuan subscription health check")
                     await host.baichuan.check_subscribe_events()
                 await asyncio.sleep(1)
         except (asyncio.CancelledError, KeyboardInterrupt):
@@ -125,15 +175,19 @@ async def tcp_push_demo():
         finally:
             host.baichuan.unregister_callback("ai_event_logger")
             try:
+                _LOGGER.debug("Unsubscribing from Baichuan events")
                 await host.baichuan.unsubscribe_events()
             except Exception as err:
                 _LOGGER.warning("Errore durante l'annullamento dell'iscrizione agli eventi: %s", err)
             try:
+                _LOGGER.debug("Logging out from Reolink host")
                 await host.logout()
             except Exception as err:
                 _LOGGER.warning("Errore durante il logout dal dispositivo: %s", err)
             if pending_tasks:
+                _LOGGER.info("Waiting for %s pending HTTP tasks to complete", len(pending_tasks))
                 await asyncio.gather(*pending_tasks, return_exceptions=True)
+            _LOGGER.debug("Closing HTTP session")
             await session.close()
 
         if should_reconnect:

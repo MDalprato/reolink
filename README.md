@@ -31,6 +31,8 @@ Create a `.env` file (or export environment variables) with the following entrie
 | `REOLINK_PASSWORD` / `PASSWORD` | Password for the device. |
 | `MOTION_BASE_URL` | Base URL for the motion webhook (default `http://10.0.1.4:8080`). Trailing slashes are trimmed automatically. |
 | `MOTION_RESET_DELAY_SECONDS` | Seconds to wait before issuing the reset callback (default `5`). |
+| `RECONNECT_INITIAL_DELAY` | Seconds to wait before the first reconnect attempt after a disconnection (default `5`). |
+| `RECONNECT_MAX_DELAY` | Maximum backoff delay between reconnect attempts (default `60`). |
 
 The script accepts either the prefixed `REOLINK_*` variables or the shorter alternatives to make it compatible with existing setups.
 
