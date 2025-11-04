@@ -2,13 +2,18 @@ import asyncio
 import logging
 import os
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Set
+from urllib.parse import quote
 
+import aiohttp
 from reolink_aio.api import Host
 from dotenv import load_dotenv
 
 logging.basicConfig(level="INFO")
 _LOGGER = logging.getLogger(__name__)
+
+MOTION_BASE_URL = "http://10.0.1.4:8080"
+MOTION_RESET_DELAY_SECONDS = 5
 
 TRACKED_AI_EVENTS = {
     "persona": ("person", "people"),
@@ -37,6 +42,36 @@ async def tcp_push_demo():
     )
     # connect and obtain/cache device settings and capabilities
     await host.get_host_data()
+    session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5))
+    pending_tasks: Set[asyncio.Task] = set()
+    loop = asyncio.get_running_loop()
+
+    async def trigger_motion(camera_name: str, channel: int) -> None:
+        name_for_url = camera_name.strip() if camera_name and camera_name.strip() else f"channel-{channel}"
+        encoded_name = quote(name_for_url, safe="")
+        motion_url = f"{MOTION_BASE_URL}/motion?{encoded_name}"
+        reset_url = f"{MOTION_BASE_URL}/motion/reset?{encoded_name}"
+
+        try:
+            async with session.get(motion_url) as response:
+                await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"status HTTP {response.status}")
+            _LOGGER.info("Inviata notifica movimento per %s (%s)", name_for_url, motion_url)
+        except Exception as err:
+            _LOGGER.warning("Errore durante la notifica di movimento per %s: %s", name_for_url, err)
+
+        await asyncio.sleep(MOTION_RESET_DELAY_SECONDS)
+
+        try:
+            async with session.get(reset_url) as response:
+                await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"status HTTP {response.status}")
+            _LOGGER.info("Reset movimento per %s (%s)", name_for_url, reset_url)
+        except Exception as err:
+            _LOGGER.warning("Errore durante il reset di movimento per %s: %s", name_for_url, err)
+
     try:
         try:
             await host.get_ai_state_all_ch()
@@ -65,6 +100,9 @@ async def tcp_push_demo():
                             camera_name,
                             channel,
                         )
+                        task = loop.create_task(trigger_motion(camera_name, channel))
+                        pending_tasks.add(task)
+                        task.add_done_callback(lambda fut: pending_tasks.discard(fut))
                     channel_cache[label] = detected
 
         # Register callback and subscribe to events
@@ -77,8 +115,17 @@ async def tcp_push_demo():
         _LOGGER.info("Interruzione richiesta dall'utente, chiusura in corso...")
     finally:
         host.baichuan.unregister_callback("ai_event_logger")
-        await host.baichuan.unsubscribe_events()
-        await host.logout()
+        try:
+            await host.baichuan.unsubscribe_events()
+        except Exception as err:
+            _LOGGER.warning("Errore durante l'annullamento dell'iscrizione agli eventi: %s", err)
+        try:
+            await host.logout()
+        except Exception as err:
+            _LOGGER.warning("Errore durante il logout dal dispositivo: %s", err)
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+        await session.close()
 
 if __name__ == "__main__":
     asyncio.run(tcp_push_demo())
