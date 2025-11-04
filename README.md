@@ -50,6 +50,20 @@ The script will:
 4. If the connection drops, automatically back off and retry the login.
 5. Continue running until interrupted. Press `Ctrl+C` to stop; pending HTTP requests complete, the Baichuan subscription is released, and the session logs out cleanly.
 
+## Running in Docker
+
+Build the container (one time):
+```bash
+docker build -t reolink-event-relay .
+```
+
+Run with environment variables mapped from your shell or an `.env` file:
+```bash
+docker run --rm --env-file .env reolink-event-relay
+```
+
+The container entrypoint runs `python main.py`. Mount additional volumes if you need to persist logs or use alternative configuration files.
+
 ## Notes
 - If the camera name is missing, the script falls back to `channel-{index}` when building the webhook URL.
 - The HTTP callbacks treat any response code ≥ 400 as an error and log a warning.
