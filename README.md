@@ -1,6 +1,6 @@
-# Reolink Event Relay
+# Reolink HKSV support for homebridge
 
-This repository contains a small asynchronous Python script that connects to a Reolink camera or NVR, listens for AI detection events (people, vehicles, pets), and forwards those events to an external HTTP endpoint. After a short delay it sends a reset call, allowing downstream automation systems to react to motion while keeping their state in sync.
+This repository contains a small asynchronous Python script that connects to a Reolink camera or NVR, listens for AI detection events (people, vehicles, pets), and forwards those events to an external HTTP endpoint. After a short delay it sends a reset call, allowing downstream automation systems to react to motion while keeping their state in sync. The script is designed to act as a lightweight server that bridges Reolink hardware with a Homebridge setup so that motion events can be captured as HomeKit Secure Video (HKSV) recordings.
 
 ## Features
 - Subscribes to the Reolink Baichuan TCP push channel for near real-time AI detections.
@@ -8,6 +8,11 @@ This repository contains a small asynchronous Python script that connects to a R
 - Issues HTTP callbacks for every new detection and schedules an automatic reset after a configurable delay.
 - Automatically retries the connection with exponential backoff whenever the device disconnects.
 - Gracefully handles shutdown (Ctrl+C) and cleans up pending network requests.
+
+## Homebridge / HKSV integration
+- Point the Homebridge plugin that exposes the `motion` and `motion/reset` endpoints to the base URL configured in `MOTION_BASE_URL`.
+- Keep camera names consistent between Homebridge and the Reolink device. The script returns the camera name exactly as reported by the NVR when building the `/motion?{camera name}` query string, so mismatched names prevent Homebridge accessories from matching the incoming events.
+- Ensure the Homebridge plugin is configured to treat the `motion` and `reset` callbacks idempotently; the script sends one notification per detection and a single reset after the configured delay.
 
 ## Requirements
 - Python 3.10+ (a virtual environment is recommended).
