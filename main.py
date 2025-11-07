@@ -26,6 +26,10 @@ async def tcp_push_demo():
     load_dotenv()
 
     settings = load_settings()
+    def _normalize_camera_name(name: str) -> str:
+        return (name or "").strip().casefold()
+
+    ignored_camera_names = {_normalize_camera_name(name) for name in settings.ignored_camera_names}
     if not all([settings.reolink_host, settings.reolink_username, settings.reolink_password]):
         raise RuntimeError(
             "Missing credentials: ensure REOLINK_HOST/USERNAME/PASSWORD or HOST/USER/PASSWORD are set in the environment."
@@ -43,6 +47,8 @@ async def tcp_push_demo():
         settings.reconnect_max_delay,
         settings.motion_event_cooldown,
     )
+    if ignored_camera_names:
+        _LOGGER.info("Telecamere ignorate per gli eventi: %s", ", ".join(settings.ignored_camera_names))
 
     reconnect_delay = settings.reconnect_initial_delay
 
@@ -116,13 +122,22 @@ async def tcp_push_demo():
             ai_state_cache: Dict[int, Dict[str, bool]] = defaultdict(dict)
 
             for channel in host.channels:
+                camera_name = host.camera_name(channel)
+                normalized_name = _normalize_camera_name(camera_name)
+                if normalized_name in ignored_camera_names:
+                    _LOGGER.info(
+                        "Telecamera '%s' (canale %s) ignorata per configurazione, salto lo stato iniziale",
+                        camera_name,
+                        channel,
+                    )
+                    continue
                 for label, object_types in TRACKED_AI_EVENTS.items():
                     ai_state_cache[channel][label] = any(
                         bool(host.ai_detected(channel, obj_type)) for obj_type in object_types
                     )
                 _LOGGER.info(
                     "Initial AI state for camera '%s' (channel %s): %s",
-                    host.camera_name(channel),
+                    camera_name,
                     channel,
                     {label: ai_state_cache[channel][label] for label in TRACKED_AI_EVENTS},
                 )
@@ -130,6 +145,9 @@ async def tcp_push_demo():
             def ai_event_callback() -> None:
                 for channel in host.channels:
                     camera_name = host.camera_name(channel)
+                    normalized_name = _normalize_camera_name(camera_name)
+                    if normalized_name in ignored_camera_names:
+                        continue
                     channel_cache = ai_state_cache.setdefault(channel, {})
                     for label, object_types in TRACKED_AI_EVENTS.items():
                         detected = any(bool(host.ai_detected(channel, obj_type)) for obj_type in object_types)
