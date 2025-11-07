@@ -1,11 +1,11 @@
 import asyncio
 import logging
+import aiohttp
+
 from collections import defaultdict
 from time import monotonic
 from typing import Dict, Set, Tuple
 from urllib.parse import quote
-
-import aiohttp
 from dotenv import load_dotenv
 from reolink_aio.api import Host
 
